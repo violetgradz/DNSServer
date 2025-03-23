@@ -1,156 +1,88 @@
-import dns.message
-import dns.rdatatype
-import dns.rdataclass
-import dns.rdtypes
-import dns.rdtypes.ANY
-from dns.rdtypes.ANY.MX import MX
-from dns.rdtypes.ANY.SOA import SOA
-import dns.rdata
-import socket
-import threading
-import signal
-import os
-import sys
-
-import hashlib
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import base64
-import ast
-
-def generate_aes_key(password, salt):
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        iterations=100000,
-        salt=salt,
-        length=32
-    )
-    key = kdf.derive(password.encode('utf-8'))
-    key = base64.urlsafe_b64encode(key)
-    return key
-
-# Lookup details on fernet in the cryptography.io documentation    
-def encrypt_with_aes(input_string, password, salt):
-    key = generate_aes_key(????)
-    f = Fernet(???)
-    encrypted_data = f.????(????.encode('utf-8')) #call the Fernet encrypt method
-    return encrypted_data    
-
-def decrypt_with_aes(encrypted_data, password, salt):
-    key = generate_aes_key(????)
-    f = Fernet(????)
-    decrypted_data = f.????(????) #call the Fernet decrypt method
-    return decrypted_data.decode('utf-8')
-
-salt = ???? # Remember it should be a byte-object
-password = ?????
-input_string = ?????
-
-encrypted_value = encrypt_with_aes(input_string, password, salt) # exfil function
-decrypted_value = decrypt_with_aes(encrypted_value, password, salt)  # exfil function
-
-# For future use    
-def generate_sha256_hash(input_string):
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(input_string.encode('utf-8'))
-    return sha256_hash.hexdigest()
-
-# A dictionary containing DNS records mapping hostnames to different types of DNS data.
-dns_records = {
-    'example.com.': {
-        dns.rdatatype.A: '192.168.1.101',
-        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
-        dns.rdatatype.MX: [(10, 'mail.example.com.')],  # List of (preference, mail server) tuples
-        dns.rdatatype.CNAME: 'www.example.com.',
-        dns.rdatatype.NS: 'ns.example.com.',
-        dns.rdatatype.TXT: ('This is a TXT record',),
-        dns.rdatatype.SOA: (
-            'ns1.example.com.', #mname
-            'admin.example.com.', #rname
-            2023081401, #serial
-            3600, #refresh
-            1800, #retry
-            604800, #expire
-            86400, #minimum
-        ),
-    },
-   
-    # Add more records as needed (see assignment instructions!
-}
-
-def run_dns_server():
-    # Create a UDP socket and bind it to the local IP address (what unique IP address is used here, similar to webserver lab) and port (the standard port for DNS)
-    server_socket = socket.socket(socket.AF_INET, ????) # Research this
-    server_socket.bind((?????, ????))
-
-    while True:
-        try:
-            # Wait for incoming DNS requests
-            data, addr = server_socket.recvfrom(1024)
-            # Parse the request using the `dns.message.from_wire` method
-            request = ?????
-            # Create a response message using the `dns.message.make_response` method
-            response = ??????
-
-            # Get the question from the request
-            question = request.question[???]
-            qname = question.name.to_text()
-            qtype = question.rdtype
-
-            # Check if there is a record in the `dns_records` dictionary that matches the question
-            if qname in dns_records and qtype in dns_records[qname]:
-                # Retrieve the data for the record and create an appropriate `rdata` object for it
-                answer_data = dns_records[qname][qtype]
-
-                rdata_list = []
-
-                if qtype == dns.rdatatype.??:
-                    for pref, server in answer_data:
-                        rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
-                elif qtype == dns.rdatatype.??:
-                    ??, ??, ??, ??, ??, ??, ?? = answer_data # What is the record format? See dns_records dictionary. Assume we handle @, Class, TTL elsewhere. Do some research on SOA Records
-                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA, ??, ??, ??, ??, ??, ??, ??) # follow format from previous line
-                    rdata_list.append(rdata)
-                else:
-                    if isinstance(answer_data, str):
-                        rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, answer_data)]
-                    else:
-                        rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, data) for data in answer_data]
-                for rdata in rdata_list:
-                    response.answer.append(dns.rrset.RRset(question.name, dns.rdataclass.IN, qtype))
-                    response.answer[-1].add(rdata)
-
-            # Set the response flags
-            response.flags |= 1 << 10
-
-            # Send the response back to the client using the `server_socket.sendto` method and put the response to_wire(), return to the addr you received from
-            print("Responding to request:", qname)
-            server_socket.??????? 
-        except KeyboardInterrupt:
-            print('\nExiting...')
-            server_socket.close()
-            sys.exit(0)
-
-
-def run_dns_server_user():
-    print("Input 'q' and hit 'enter' to quit")
-    print("DNS server is running...")
-
-    def user_input():
-        while True:
-            cmd = input()
-            if cmd.lower() == 'q':
-                print('Quitting...')
-                os.kill(os.getpid(), signal.SIGINT)
-
-    input_thread = threading.Thread(target=user_input)
-    input_thread.daemon = True
-    input_thread.start()
-    run_dns_server()
-
-
+# DNS Client for Part 1 of the DNS assignment
+# Fills in the missing parts from the skeleton code
+import dns.resolver
+ 
+# Set the IP address of the local DNS server and a public DNS server
+local_host_ip = '127.0.0.1'  # localhost IP address
+real_name_server = '8.8.8.8'  # I found Google's DNS server by researching online
+ 
+ 
+# Create a list of domain names to query - use the same list from the DNS Server
+domainList = ['example.com.','safebank.com.','google.com.','nyu.edu.','legitsite.com.']
+ 
+# Define a function to query the local DNS server for the IP address of a given domain name
+def query_local_dns_server(domain, question_type):
+    """
+    This function queries the local DNS server running on localhost
+    """
+    try:
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = [local_host_ip]
+        # print(f"Querying local DNS for {domain}") # used this for debugging
+        answers = resolver.resolve(domain, question_type)  # resolve the domain with question_type
+     
+        ip_address = answers[0].to_text()  # get the first answer
+        return ip_address
+    except dns.resolver.NXDOMAIN:
+        return f"Domain {domain} does not exist"
+    except Exception as e:
+        return f"Error: {e}"
+ 
+# Define a function to query a public DNS server for the IP address of a given domain name
+def query_dns_server(domain, question_type):
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = [real_name_server]
+    answers = resolver.resolve(domain, question_type)
+ 
+    ip_address = answers[0].to_text()  # extract the first IP address
+    return ip_address
+ 
+# Define a function to compare the results from the local and public DNS servers for each domain name in the list
+def compare_dns_servers(domainList, question_type):
+    for domain_name in domainList:
+        # get IP from local DNS
+        local_ip_address = query_local_dns_server(domain_name, question_type)
+        # get IP from public DNS
+        public_ip_address = query_dns_server(domain_name, question_type)
+        # if they don't match, return False
+        if local_ip_address != public_ip_address:
+            return False
+    # if all match, return True
+    return True    
+ 
+# Define a function to print the results from querying both the local and public DNS servers for each domain name in the domainList
+def local_external_DNS_output(question_type):    
+    print("Local DNS Server")
+    for domain_name in domainList:
+        ip_address = query_local_dns_server(domain_name, question_type)
+        print(f"The IP address of {domain_name} is {ip_address}")
+ 
+ 
+    print("\nPublic DNS Server")
+ 
+    for domain_name in domainList:
+        ip_address = query_dns_server(domain_name, question_type)
+        print(f"The IP address of {domain_name} is {ip_address}")
+ 
+ 
+def exfiltrate_info(domain, question_type):  # testing method for part 2
+    data = query_local_dns_server(domain, question_type)
+    return data 
+ 
+ 
 if __name__ == '__main__':
-    run_dns_server_user()
-    #print("Encrypted Value:", encrypted_value)
-    #print("Decrypted Value:", decrypted_value)
+ 
+    # Set the type of DNS query to be performed
+    question_type = 'A'  # for IPv4 addresses
+ 
+ 
+    # Call the function to print the results from querying both DNS servers
+    local_external_DNS_output(question_type)
+ 
+    # Call the function to compare the results from both DNS servers and print the result
+    compare_result = compare_dns_servers(domainList, question_type)
+    print(f"Are the DNS results the same? {compare_result}")
+    
+    # According to assignment we need to test a specific domain
+    nyu_ip = query_local_dns_server('nyu.edu.', question_type)
+    print(f"The IP for nyu.edu is: {nyu_ip}")
