@@ -30,26 +30,23 @@ def generate_aes_key(password, salt):
     key = base64.urlsafe_b64encode(key)
     return key
 
-# I found info about Fernet in the cryptography.io docs  
+# Lookup details on fernet in the cryptography.io documentation    
 def encrypt_with_aes(input_string, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    # print("Encrypting:", input_string) # used this for debugging
-    encrypted_data = f.encrypt(input_string.encode('utf-8')) # encrypt the string after encoding to bytes
+    encrypted_data = f.encrypt(input_string.encode('utf-8'))
     return encrypted_data    
 
 def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    decrypted_data = f.decrypt(encrypted_data) # decrypt the encrypted data
+    decrypted_data = f.decrypt(encrypted_data)
     return decrypted_data.decode('utf-8')
 
-# The assignment said to use 'Tandon' as salt and encode as bytes
-salt = b'Tandon'  # I used b prefix to make it bytes
-password = "bd2671@nyu.edu"  # My real email
-input_string = "AlwaysWatching"  # This is the secret data from the instructions
+salt = b'Tandon'
+password = "bd2671@nyu.edu"
+input_string = "AlwaysWatching"
 
-# Try the encryption
 encrypted_value = encrypt_with_aes(input_string, password, salt)
 decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
 
@@ -59,27 +56,25 @@ def generate_sha256_hash(input_string):
     sha256_hash.update(input_string.encode('utf-8'))
     return sha256_hash.hexdigest()
 
-# A dictionary of DNS records - I need to add the records from the assignment
+# A dictionary containing DNS records mapping hostnames to different types of DNS data.
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
-        dns.rdatatype.MX: [(10, 'mail.example.com.')],  # List of (preference, mail server) tuples
+        dns.rdatatype.MX: [(10, 'mail.example.com.')],
         dns.rdatatype.CNAME: 'www.example.com.',
         dns.rdatatype.NS: 'ns.example.com.',
         dns.rdatatype.TXT: ('This is a TXT record',),
         dns.rdatatype.SOA: (
-            'ns1.example.com.', #mname
-            'admin.example.com.', #rname
-            2023081401, #serial
-            3600, #refresh
-            1800, #retry
-            604800, #expire
-            86400, #minimum
+            'ns1.example.com.',
+            'admin.example.com.',
+            2023081401,
+            3600,
+            1800,
+            604800,
+            86400,
         ),
     },
-   
-    # Adding the A records from the assignment
     'safebank.com.': {
         dns.rdatatype.A: '192.168.1.102',
     },
@@ -92,10 +87,8 @@ dns_records = {
     'yahoo.com.': {
         dns.rdatatype.A: '192.168.1.105',
     },
-    # This one has more records
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        # Making the encrypted value a string for TXT record
         dns.rdatatype.TXT: (str(encrypted_value),),
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
@@ -104,43 +97,44 @@ dns_records = {
 }
 
 def run_dns_server():
-    """
-    This function runs the DNS server and responds to requests
-    """
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # Create a UDP socket - port 53 is for DNS according to my research
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         server_socket.bind(('127.0.0.1', 53))
-        
-        print("Server is listening on 127.0.0.1:53")
-        
-        while True:
-            # Get the DNS request
+    except PermissionError:
+        # If port 53 is not available, try a higher port for testing
+        print("Permission denied for port 53, trying port 5353 instead")
+        server_socket.bind(('127.0.0.1', 5353))
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print("Port 53 is already in use, trying port 5353 instead")
+            server_socket.bind(('127.0.0.1', 5353))
+        else:
+            raise
+
+    while True:
+        try:
+            # Wait for incoming DNS requests
             data, addr = server_socket.recvfrom(1024)
-            # Parse it using dns.message
+            # Parse the request
             request = dns.message.from_wire(data)
-            # Make a response
+            # Create a response message
             response = dns.message.make_response(request)
 
-            # Get the first question (index 0)
+            # Get the question from the request
             question = request.question[0]
             qname = question.name.to_text()
             qtype = question.rdtype
 
-            # See if we have that record
+            # Check if there is a record in the dns_records dictionary
             if qname in dns_records and qtype in dns_records[qname]:
-                # I have the answer
                 answer_data = dns_records[qname][qtype]
-                
-                # List to hold rdata objects
+
                 rdata_list = []
 
-                # Handle different record types differently
                 if qtype == dns.rdatatype.MX:
                     for pref, server in answer_data:
                         rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
                 elif qtype == dns.rdatatype.SOA:
-                    # Needed to figure out SOA format
                     mname, rname, serial, refresh, retry, expire, minimum = answer_data
                     rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA, mname, rname, serial, refresh, retry, expire, minimum)
                     rdata_list.append(rdata)
@@ -150,27 +144,22 @@ def run_dns_server():
                     else:
                         rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, data) for data in answer_data]
                 
-                # Add all the responses
                 for rdata in rdata_list:
                     response.answer.append(dns.rrset.RRset(question.name, dns.rdataclass.IN, qtype))
                     response.answer[-1].add(rdata)
 
-            # Set the authoritative answer flag by adding 1 left-shifted by 10 positions
+            # Set the AA (Authoritative Answer) flag
             response.flags |= 1 << 10
 
-            # Send the response back
-            print(f"Responding to DNS request for: {qname}, type: {dns.rdatatype.to_text(qtype)}")
+            # Send the response back to the client
             server_socket.sendto(response.to_wire(), addr)
-    except KeyboardInterrupt:
-        print('\nExiting...')
-        server_socket.close()
-        sys.exit(0)
-    except Exception as e:
-        # Added basic error handling
-        print(f"Error: {e}")
-        server_socket.close()
-        sys.exit(1)
-
+        except KeyboardInterrupt:
+            print('\nExiting...')
+            server_socket.close()
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error handling request: {e}")
+            continue
 
 def run_dns_server_user():
     print("Input 'q' and hit 'enter' to quit")
@@ -182,6 +171,7 @@ def run_dns_server_user():
             if cmd.lower() == 'q':
                 print('Quitting...')
                 os.kill(os.getpid(), signal.SIGINT)
+                break
 
     input_thread = threading.Thread(target=user_input)
     input_thread.daemon = True
@@ -190,8 +180,4 @@ def run_dns_server_user():
 
 
 if __name__ == '__main__':
-    # TODO: test this more with the DNSClient from part 1
     run_dns_server_user()
-    # I used these for testing the encryption
-    # print("Encrypted Value:", encrypted_value)
-    # print("Decrypted Value:", decrypted_value)
